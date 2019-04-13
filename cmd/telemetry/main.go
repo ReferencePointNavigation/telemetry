@@ -12,6 +12,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
 )
 
@@ -50,6 +52,20 @@ func newServer() *particleCastServer {
 	return p
 }
 
+// Get preferred outbound ip of this machine
+func GetOutboundIP() net.IP {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP
+}
+
+
 func main() {
 	flag.Parse()
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
@@ -71,6 +87,26 @@ func main() {
 		opts = []grpc.ServerOption{grpc.Creds(creds)}
 	}
 	grpcServer := grpc.NewServer(opts...)
+
+
 	pb.RegisterParticleCastServer(grpcServer, newServer())
-	grpcServer.Serve(lis)
+
+	signalChan := make(chan os.Signal, 1)
+	cleanupDone := make(chan struct{})
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		<-signalChan
+		fmt.Println("\nReceived an interrupt, stopping services...")
+		grpcServer.GracefulStop()
+		close(cleanupDone)
+	}()
+
+	log.Printf("Starting telemtry server on %s:%d", GetOutboundIP(), *port)
+
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatal("Error starting server: %s", err)
+	}
+
+	<-cleanupDone
+
 }
