@@ -5,52 +5,26 @@ package main
 import (
 	"flag"
 	"fmt"
+	db2 "github.com/ReferencePointNavigation/telemetry/db"
 	pb "github.com/ReferencePointNavigation/telemetry/protobuf"
+	"github.com/ReferencePointNavigation/telemetry/telemetry"
+	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/testdata"
-	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 )
 
 var (
-	tls        = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
-	certFile   = flag.String("cert_file", "", "The TLS cert file")
-	keyFile    = flag.String("key_file", "", "The TLS key file")
-	port       = flag.Int("port", 10000, "The server port")
+	tls = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
+	certFile = flag.String("cert_file", "", "The TLS cert file")
+	keyFile = flag.String("key_file", "", "The TLS key file")
+	port = flag.Int("port", 10000, "The server port")
+	dbFile = flag.String("database", "./telemetry.db", "path to telemetry database")
 )
-
-type particleCastServer struct {
-
-	mu sync.Mutex
-
-}
-
-func (p *particleCastServer) CastParticleState(stream pb.ParticleCast_CastParticleStateServer) error {
-	var pointCount int32
-
-	for {
-		_, err := stream.Recv()
-		if err == io.EOF {
-			return stream.SendAndClose(&pb.CastSummary{
-				NumStates:   pointCount,
-			})
-		}
-		if err != nil {
-			return err
-		}
-		pointCount++
-	}
-}
-
-func newServer() *particleCastServer {
-	p := &particleCastServer{}
-	return p
-}
 
 // Get preferred outbound ip of this machine
 func GetOutboundIP() net.IP {
@@ -65,13 +39,15 @@ func GetOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-
 func main() {
+
 	flag.Parse()
+
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+
 	var opts []grpc.ServerOption
 	if *tls {
 		if *certFile == "" {
@@ -86,10 +62,14 @@ func main() {
 		}
 		opts = []grpc.ServerOption{grpc.Creds(creds)}
 	}
+
+	db, err := db2.OpenDatabase(*dbFile)
+
 	grpcServer := grpc.NewServer(opts...)
 
+	server, err := telemetry.NewServer(db)
 
-	pb.RegisterParticleCastServer(grpcServer, newServer())
+	pb.RegisterTelemetryServer(grpcServer, server)
 
 	signalChan := make(chan os.Signal, 1)
 	cleanupDone := make(chan struct{})
