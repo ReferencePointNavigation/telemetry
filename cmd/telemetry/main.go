@@ -84,7 +84,7 @@ func main() {
 	log.Printf("Starting telemtry server on %s:%d", GetOutboundIP(), *port)
 
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatal("Error starting server: %s", err)
+		log.Fatalf("Error starting server: %v", err)
 	}
 
 	<-cleanupDone
